@@ -281,6 +281,7 @@ a:hover{text-decoration:underline}
 
 .hidden{display:none!important}
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -335,6 +336,11 @@ a:hover{text-decoration:underline}
 <script>
 (function(){
 "use strict";
+
+/* ===== SUPABASE CLIENT ===== */
+var SUPABASE_URL = 'https://raokjeukcjtcnnnkeleu.supabase.co';  // ← Section 1でメモしたURL
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJhb2tqZXVrY2p0Y25ubmtlbGV1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MDY0MjYsImV4cCI6MjA4OTE4MjQyNn0.Yzaj5FQdZA1w6Ia_5e9KZzi4Cq0ydYEKL_pvuhQOPg4';            // ← Section 1でメモしたanon key
+var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ===== CONSTANTS ===== */
 var SK='creative-task-mgr-v3';
@@ -424,6 +430,10 @@ var FMT14=FMT_PRESETS.shanaiho.steps;
 var customFmts=[];
 
 /* ===== UTIL ===== */
+/* ===== SUPABASE DELETE HELPERS ===== */
+async function deleteFromSupabase(table, id){
+  try { await supabase.from(table).delete().eq('id', id); } catch(e){ console.error('Delete error:', e); }
+}
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
 function escH(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML}
 function todayS(){var d=new Date(),m=d.getMonth()+1,dd=d.getDate();return d.getFullYear()+'-'+(m<10?'0'+m:m)+'-'+(dd<10?'0'+dd:dd)}
@@ -470,11 +480,259 @@ function isHoliday(isoDate){
 
 /* ===== STATE ===== */
 var S;
-function save(){try{localStorage.setItem(SK,JSON.stringify(S))}catch(e){}updateSaveTs()}
-function load(){
+
+// localStorageバックアップ（フォールバック用に残す）
+function saveLocal(){try{localStorage.setItem(SK,JSON.stringify(S))}catch(e){}}
+
+async function save(){
+  saveLocal();  // ローカルバックアップ
+  try {
+    // --- members ---
+    if(S.members && S.members.length){
+      var membersData = S.members.map(function(m){
+        return { id: m.id, name: m.name, role: m.role, color: m.color };
+      });
+      await supabase.from('members').upsert(membersData, { onConflict: 'id' });
+    }
+
+    // --- projects ---
+    for(var pi=0; pi<S.projects.length; pi++){
+      var p = S.projects[pi];
+      await supabase.from('projects').upsert({
+        id: p.id, name: p.name, client: p.client || '',
+        media_type: p.mediaType || 'shanaiho'
+      }, { onConflict: 'id' });
+
+      // project_members: 一度削除して再挿入
+      await supabase.from('project_members').delete().eq('project_id', p.id);
+      if(p.members && p.members.length){
+        var pmRows = p.members.map(function(mid){
+          return { project_id: p.id, member_id: mid };
+        });
+        await supabase.from('project_members').insert(pmRows);
+      }
+
+      // --- gous ---
+      var gous = p.gous || [];
+      for(var gi=0; gi<gous.length; gi++){
+        var g = gous[gi];
+        await supabase.from('gous').upsert({
+          id: g.id, project_id: p.id, name: g.name, sort_order: gi
+        }, { onConflict: 'id' });
+
+        // --- kikakus ---
+        var kikakus = g.kikakus || [];
+        for(var ki=0; ki<kikakus.length; ki++){
+          var k = kikakus[ki];
+          await supabase.from('kikakus').upsert({
+            id: k.id, gou_id: g.id, name: k.name, sort_order: ki
+          }, { onConflict: 'id' });
+
+          // --- tasks ---
+          var tasks = k.tasks || [];
+          for(var ti=0; ti<tasks.length; ti++){
+            var t = tasks[ti];
+            await supabase.from('tasks').upsert({
+              id: t.id, kikaku_id: k.id, name: t.name,
+              assignee: t.assignee || '',
+              plan_start: t.planStart || null,
+              plan_end: t.planEnd || null,
+              actual_start: t.actualStart || null,
+              actual_end: t.actualEnd || null,
+              status: t.status || 'not_started',
+              estimated_hours: t.estimatedHours || 0,
+              note: t.note || '',
+              sort_order: ti
+            }, { onConflict: 'id' });
+
+            // --- assignee_history ---
+            if(t.assigneeHistory && t.assigneeHistory.length){
+              for(var hi=0; hi<t.assigneeHistory.length; hi++){
+                var ah = t.assigneeHistory[hi];
+                await supabase.from('assignee_history').upsert({
+                  task_id: t.id,
+                  from_name: ah.from || '',
+                  to_name: ah.to || '',
+                  changed_at: ah.timestamp || new Date().toISOString()
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // --- timeSchedule ---
+    // timeScheduleは "memberId:YYYY-MM-DD" → [{hour, taskId}] の形式
+    if(S.timeSchedule){
+      var tsRows = [];
+      Object.keys(S.timeSchedule).forEach(function(key){
+        var parts = key.split(':');
+        var memberId = parts[0];
+        var date = parts.slice(1).join(':');  // YYYY-MM-DD
+        var slots = S.timeSchedule[key];
+        if(slots && slots.length){
+          slots.forEach(function(slot){
+            tsRows.push({
+              member_id: memberId,
+              task_id: slot.taskId,
+              date: date,
+              hour: slot.hour
+            });
+          });
+        }
+      });
+      // 全削除→再挿入（差分管理は複雑なため）
+      await supabase.from('time_schedules').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      if(tsRows.length){
+        // 100件ずつバッチ挿入
+        for(var bi=0; bi<tsRows.length; bi+=100){
+          await supabase.from('time_schedules').insert(tsRows.slice(bi, bi+100));
+        }
+      }
+    }
+  } catch(e) {
+    console.error('Supabase save error:', e);
+  }
+  updateSaveTs();
+}
+
+// localStorageからのフォールバック読み込み
+function loadLocal(){
   try{var d=localStorage.getItem(SK);if(d){S=JSON.parse(d);migrate();return true}}catch(e){}
   return false;
 }
+
+async function load(){
+  try {
+    // --- members ---
+    var { data: membersData } = await supabase.from('members').select('*');
+
+    // --- projects（全階層を一括取得）---
+    var { data: projectsData } = await supabase
+      .from('projects')
+      .select('*, project_members(member_id), gous(*, kikakus(*, tasks(*)))');
+
+    // --- time_schedules ---
+    var { data: tsData } = await supabase.from('time_schedules').select('*');
+
+    // --- assignee_history ---
+    var { data: ahData } = await supabase.from('assignee_history').select('*');
+
+    // データが空ならlocalStorageフォールバック
+    if(!projectsData || projectsData.length === 0){
+      if(!membersData || membersData.length === 0){
+        return loadLocal();
+      }
+    }
+
+    // ahDataをtask_idでグループ化
+    var ahMap = {};
+    if(ahData){
+      ahData.forEach(function(ah){
+        if(!ahMap[ah.task_id]) ahMap[ah.task_id] = [];
+        ahMap[ah.task_id].push({
+          from: ah.from_name,
+          to: ah.to_name,
+          timestamp: ah.changed_at
+        });
+      });
+    }
+
+    // Supabaseデータ → Sの形式に変換
+    var projects = (projectsData || []).map(function(p){
+      return {
+        id: p.id,
+        name: p.name,
+        client: p.client || '',
+        mediaType: p.media_type || 'shanaiho',
+        members: (p.project_members || []).map(function(pm){ return pm.member_id; }),
+        createdAt: p.created_at,
+        gous: (p.gous || [])
+          .sort(function(a,b){ return (a.sort_order||0) - (b.sort_order||0); })
+          .map(function(g){
+            return {
+              id: g.id,
+              name: g.name,
+              kikakus: (g.kikakus || [])
+                .sort(function(a,b){ return (a.sort_order||0) - (b.sort_order||0); })
+                .map(function(k){
+                  return {
+                    id: k.id,
+                    name: k.name,
+                    tasks: (k.tasks || [])
+                      .sort(function(a,b){ return (a.sort_order||0) - (b.sort_order||0); })
+                      .map(function(t){
+                        return {
+                          id: t.id,
+                          name: t.name,
+                          assignee: t.assignee || '',
+                          planStart: t.plan_start || '',
+                          planEnd: t.plan_end || '',
+                          actualStart: t.actual_start || '',
+                          actualEnd: t.actual_end || '',
+                          status: t.status || 'not_started',
+                          estimatedHours: t.estimated_hours || 0,
+                          note: t.note || '',
+                          assigneeHistory: ahMap[t.id] || []
+                        };
+                      })
+                  };
+                })
+            };
+          })
+      };
+    });
+
+    var members = (membersData || []).map(function(m){
+      return { id: m.id, name: m.name, role: m.role || 'other', color: m.color || '#64748b' };
+    });
+
+    // timeScheduleの復元
+    var timeSchedule = {};
+    if(tsData){
+      tsData.forEach(function(ts){
+        var key = ts.member_id + ':' + ts.date;
+        if(!timeSchedule[key]) timeSchedule[key] = [];
+        timeSchedule[key].push({ hour: ts.hour, taskId: ts.task_id });
+      });
+    }
+
+    // UI状態はlocalStorageから復元
+    var uiState = {};
+    try {
+      var localData = localStorage.getItem(SK);
+      if(localData){
+        var parsed = JSON.parse(localData);
+        uiState = {
+          activeProjectId: parsed.activeProjectId || '',
+          activeGouId: parsed.activeGouId || '',
+          activeKikakuId: parsed.activeKikakuId || '',
+          currentScreen: parsed.currentScreen || 'dashboard',
+          activeView: parsed.activeView || 'table'
+        };
+      }
+    } catch(e){}
+
+    S = {
+      projects: projects,
+      members: members,
+      timeSchedule: timeSchedule,
+      activeProjectId: uiState.activeProjectId || '',
+      activeGouId: uiState.activeGouId || '',
+      activeKikakuId: uiState.activeKikakuId || '',
+      currentScreen: uiState.currentScreen || 'dashboard',
+      activeView: uiState.activeView || 'table'
+    };
+
+    saveLocal();  // ローカルにもバックアップ
+    return true;
+  } catch(e) {
+    console.error('Supabase load error:', e);
+    return loadLocal();  // エラー時はlocalStorageフォールバック
+  }
+}
+
 function updateSaveTs(){var el=document.getElementById('lastSave');if(!el)return;var n=new Date();el.textContent='最終保存: '+n.getFullYear()+'-'+p2(n.getMonth()+1)+'-'+p2(n.getDate())+' '+p2(n.getHours())+':'+p2(n.getMinutes())}
 
 /* ===== MIGRATION (3-tier → 4-tier) ===== */
@@ -531,6 +789,7 @@ function nav(scr,opts){
   if(scr==='project'){var p=getProj();if(p&&p.gous.length){S.activeGouId=p.gous[0].id}else{S.activeGouId=null}S.activeKikakuId=null}
   if(scr==='gou'){var g=getGou();if(g&&g.kikakus.length)S.activeKikakuId=g.kikakus[0].id;else S.activeKikakuId=null}
   S.currentScreen=scr;save();renderAll();
+  saveLocal();  // UI状態をローカルに保存
 }
 window.nav=nav;
 
@@ -3382,10 +3641,41 @@ function recordAssigneeChange(task,oldAssignee,newAssignee){
 }
 
 /* ===== INIT ===== */
-function init(){
-  if(!load()){S={projects:[],members:[],activeProjectId:'',activeGouId:'',activeKikakuId:'',currentScreen:'dashboard',activeView:'table',timeSchedule:{}};save()}
+async function init(){
+  var loaded = await load();
+  if(!loaded){
+    S={projects:[],members:[],activeProjectId:'',activeGouId:'',activeKikakuId:'',currentScreen:'dashboard',activeView:'table',timeSchedule:{}};
+    save();
+  }
   renderAll();
+  setupRealtime();  // リアルタイム同期を開始
 }
+
+/* ===== SUPABASE REALTIME ===== */
+function setupRealtime(){
+  supabase
+    .channel('schema-db-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, function(){
+      load().then(function(){ renderAll(); });
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, function(){
+      load().then(function(){ renderAll(); });
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'members' }, function(){
+      load().then(function(){ renderAll(); });
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'gous' }, function(){
+      load().then(function(){ renderAll(); });
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'kikakus' }, function(){
+      load().then(function(){ renderAll(); });
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'time_schedules' }, function(){
+      load().then(function(){ renderAll(); });
+    })
+    .subscribe();
+}
+
 init();
 
 })();
