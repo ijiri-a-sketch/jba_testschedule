@@ -35,13 +35,19 @@ async function dbGetMembers() {
   var { data, error } = await sb.from('members').select('*').order('created_at');
   if (error) { console.error('[DB] members fetch error:', error); return []; }
   return data.map(function(m) {
-    return { id: m.id, name: m.name, role: m.role, color: m.color };
+    return {
+      id: m.id, name: m.name, role: m.role, color: m.color,
+      location: m.location || 'osaka',
+      maxHoursPerDay: m.max_hours_per_day != null ? parseFloat(m.max_hours_per_day) : 8
+    };
   });
 }
 
 async function dbUpsertMember(member) {
   var { error } = await sb.from('members').upsert({
-    id: member.id, name: member.name, role: member.role, color: member.color
+    id: member.id, name: member.name, role: member.role, color: member.color,
+    location: member.location || 'osaka',
+    max_hours_per_day: member.maxHoursPerDay != null ? member.maxHoursPerDay : 8
   });
   if (error) console.error('[DB] member upsert error:', error);
 }
@@ -150,7 +156,11 @@ async function dbSaveFullState(S) {
   await sb.from('members').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   if (S.members && S.members.length > 0) {
     await sb.from('members').insert(S.members.map(function(m) {
-      return { id: m.id, name: m.name, role: m.role, color: m.color };
+      return {
+        id: m.id, name: m.name, role: m.role, color: m.color,
+        location: m.location || 'osaka',
+        max_hours_per_day: m.maxHoursPerDay != null ? m.maxHoursPerDay : 8
+      };
     }));
   }
 

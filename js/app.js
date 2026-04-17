@@ -131,9 +131,35 @@ var S;
 
 function saveLocal(){try{localStorage.setItem(SK,JSON.stringify(S))}catch(e){if(e.name==='QuotaExceededError'||e.code===22)toast('ストレージ容量が不足しています。バックアップを取得してから不要な案件を削除してください','err')}}
 
+/* ===== Supabase 同期ステータス ===== */
+var _dbSyncTimer = null;
+var _dbAvailable = false;  // initSupabase成功後にtrue
+var _dbSyncing = false;
+
 function save(){
   saveLocal();
   updateSaveTs();
+  // Supabaseへの非同期保存（デバウンス: 連続saveをまとめる）
+  if(_dbAvailable && typeof dbSaveFullState === 'function'){
+    if(_dbSyncTimer) clearTimeout(_dbSyncTimer);
+    _dbSyncTimer = setTimeout(function(){
+      if(_dbSyncing) return;
+      _dbSyncing = true;
+      dbSaveFullState(S).then(function(){
+        _dbSyncing = false;
+        var el = document.getElementById('lastSave');
+        if(el){
+          var n = new Date();
+          el.textContent = '☁ 同期済: '+n.getFullYear()+'-'+p2(n.getMonth()+1)+'-'+p2(n.getDate())+' '+p2(n.getHours())+':'+p2(n.getMinutes());
+        }
+      }).catch(function(err){
+        _dbSyncing = false;
+        console.error('[DB] save failed:', err);
+        var el = document.getElementById('lastSave');
+        if(el) el.textContent = '⚠ DB同期失敗（ローカル保存済）';
+      });
+    }, 1500);  // 1.5秒デバウンス
+  }
 }
 
 function loadLocal(){
@@ -143,6 +169,38 @@ function loadLocal(){
 
 function load(){
   return loadLocal();
+}
+
+/* ===== Supabase 読み込み（非同期・ローカルが空のとき用） ===== */
+async function loadFromDB(){
+  if(!_dbAvailable) return false;
+  try{
+    var members = await dbGetMembers();
+    var projects = await dbGetProjects();
+    var timeSchedule = await dbGetTimeSchedule();
+
+    // データが一切なければ失敗扱い（初回セットアップ想定）
+    if((!members || members.length===0) && (!projects || projects.length===0)){
+      return false;
+    }
+
+    S = {
+      projects: projects || [],
+      members: members || [],
+      activeProjectId: '',
+      activeGouId: '',
+      activeKikakuId: '',
+      currentScreen: 'dashboard',
+      activeView: 'table',
+      timeSchedule: timeSchedule || {}
+    };
+    migrate();
+    saveLocal();  // ローカルにもキャッシュ
+    return true;
+  }catch(e){
+    console.error('[DB] load failed:', e);
+    return false;
+  }
 }
 
 function updateSaveTs(){var el=document.getElementById('lastSave');if(!el)return;var n=new Date();el.textContent='最終保存: '+n.getFullYear()+'-'+p2(n.getMonth()+1)+'-'+p2(n.getDate())+' '+p2(n.getHours())+':'+p2(n.getMinutes())}
@@ -4502,14 +4560,38 @@ window.addEventListener('popstate',function(e){
 });
 
 /* ===== INIT ===== */
-function init(){
-  var loaded = load();
+async function init(){
+  // 1. Supabase 初期化を試みる
+  if(typeof initSupabase === 'function'){
+    _dbAvailable = initSupabase();
+  }
+
+  // 2. データ読み込み優先順: Supabase → localStorage → 空
+  var loaded = false;
+
+  if(_dbAvailable){
+    // まずSupabaseから読む
+    loaded = await loadFromDB();
+  }
+
   if(!loaded){
-    S={projects:[],members:[],activeProjectId:'',activeGouId:'',activeKikakuId:'',currentScreen:'dashboard',activeView:'table',timeSchedule:{}};
+    // Supabaseが使えない or データ無し → localStorageから
+    loaded = load();
+  }
+
+  if(!loaded){
+    // それも無ければ空データで初期化
+    S = {projects:[],members:[],activeProjectId:'',activeGouId:'',activeKikakuId:'',currentScreen:'dashboard',activeView:'table',timeSchedule:{}};
     save();
   }
+
   renderAll();
   history.replaceState({scr:S.currentScreen,pid:S.activeProjectId,gid:S.activeGouId,kid:S.activeKikakuId},'',null);
+
+  // 3. 起動完了後、DB接続状態をフッターに表示
+  var el = document.getElementById('lastSave');
+  if(el && _dbAvailable) el.textContent += ' · ☁ DB接続OK';
+  else if(el && !_dbAvailable) el.textContent += ' · 📦 ローカルのみ';
 }
 
 init();
