@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>クリエイティブ制作 タスクマネージャー</title>
+<link rel="stylesheet" href="css/style.css?v=20260417l">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+<header class="header">
+  <button class="menu-toggle" onclick="toggleSidebar()" title="メニュー">☰</button>
+  <h1 onclick="nav('dashboard')"><span>●</span> タスクマネージャー</h1>
+  <div class="breadcrumb" id="bc"></div>
+  <div class="header-spacer"></div>
+  <div class="zoom-controls">
+    <button onclick="zoomOut()" title="縮小">A-</button>
+    <span id="zoomLevel">100%</span>
+    <button onclick="zoomIn()" title="拡大">A+</button>
+    <button onclick="zoomReset()" title="リセット" style="font-size:.7rem">↺</button>
+  </div>
+</header>
+<div class="app">
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-nav">
+      <button class="snav active" id="navDash" onclick="nav('dashboard')" tabindex="0">◫ ダッシュボード</button>
+      <button class="snav" id="navMembers" onclick="nav('members')" tabindex="0">👤 チームメンバー</button>
+      <button class="snav" id="navIchiran" onclick="nav('ichiran')" tabindex="0">📊 一覧</button>
+      <button class="snav" id="navDaiwari" onclick="nav('daiwari')" tabindex="0">📐 台割</button>
+      <button class="snav" id="navFmt" onclick="nav('fmt')" tabindex="0">📋 FMT設定</button>
+    </div>
+    <div class="sidebar-title"><span title="案件 → 号 → 企画 → 工程 の4階層で管理します">プロジェクト</span><button onclick="showNewProjectModal()" title="新規プロジェクト">＋</button></div>
+    <div class="sidebar-list" id="projList"></div>
+  </aside>
+  <div class="main">
+    <div class="toolbar hidden" id="toolbar">
+      <div class="tab-group">
+        <button class="tab-btn active" data-v="table" onclick="switchView('table')">テーブル</button>
+        <button class="tab-btn" data-v="pageMatrix" onclick="switchView('pageMatrix')">ページ進捗</button>
+        <button class="tab-btn" data-v="schedule" onclick="switchView('schedule')">スケジュール表</button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div id="filterBar" style="display:flex;gap:.3rem;align-items:center;font-size:.7rem">
+        <select id="filterStatus" onchange="applyFilters()" style="font-size:.7rem;padding:.2rem .35rem"><option value="">全ステータス</option><option value="not_started">未着手</option><option value="in_progress">進行中</option><option value="completed">完了</option></select>
+        <select id="filterAssignee" onchange="applyFilters()" style="font-size:.7rem;padding:.2rem .35rem"><option value="">全担当者</option></select>
+        <input type="text" id="filterText" placeholder="🔍 検索..." oninput="applyFilters()" style="font-size:.7rem;padding:.2rem .35rem;width:100px">
+      </div>
+      <button class="tbtn" onclick="showCSVModal('schedule')">📥 スケジュールCSV取込</button>
+      <button class="tbtn" onclick="exportCSV()">📤 CSV出力</button>
+      <button class="tbtn" onclick="showExcelImportModal()">📥 Excel取込</button>
+      <button class="tbtn" onclick="exportExcel()">📤 Excel出力</button>
+      <button class="tbtn" onclick="showBackupModal()">💾 バックアップ</button>
+    </div>
+    <div class="summary-bar hidden" id="sumbar"></div>
+    <div class="ktabs hidden" id="ktabs"></div>
+    <div class="vc" id="vc">
+      <div id="dashArea"></div>
+      <div id="projArea" class="hidden"></div>
+      <div id="gouArea" class="hidden"></div>
+      <div id="kikakuArea" class="hidden"><div id="viewContent"></div></div>
+      <div id="membersArea" class="hidden"></div>
+      <div id="fmtArea" class="hidden"></div>
+      <div id="ichiranArea" class="hidden" style="display:flex;flex-direction:column;height:100%"></div>
+      <div id="daiwariArea" class="hidden" style="display:flex;flex-direction:column;height:100%"></div>
+    </div>
+  </div>
+</div>
+<footer class="footer"><span id="lastSave">未保存</span></footer>
+</div>
+<div class="modal-bg hidden" id="modalBg" onclick="if(event.target===this)closeModal()"><div class="modal" id="modalBox"></div></div>
+<div class="toast-c" id="toastC"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="js/supabase-client.js?v=20260417l"></script>
+<script src="js/app.js?v=20260417l"></script>
+</body>
+</html>
