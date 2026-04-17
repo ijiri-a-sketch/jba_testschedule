@@ -9,7 +9,7 @@
 // ============================================================
 
 var SUPABASE_URL  = 'https://krtecijyiklragfzfdvy.supabase.co';
-var SUPABASE_ANON_KEY = 'sb_publishable_QfYSVrTnW3pisP3yiDMDdg_vwZ7WjAb';
+var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtydGVjaWp5aWtscmFnZnpmZHZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0MTQ5MjksImV4cCI6MjA5MTk5MDkyOX0.7brSmqaoT47uca5oKDgc1Fmq3pd4C2NAFwVgn_zpoKU';
 
 // Supabase JS v2 CDN から読み込み済み前提
 // <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
