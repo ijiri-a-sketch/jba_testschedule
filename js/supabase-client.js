@@ -8,8 +8,8 @@
 //   4. db/supabase_schema.sql を SQL Editor で実行
 // ============================================================
 
-var SUPABASE_URL  = 'https://YOUR_PROJECT_REF.supabase.co';
-var SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+var SUPABASE_URL  = 'https://krtecijyiklragfzfdvy.supabase.co';
+var SUPABASE_ANON_KEY = 'sb_publishable_QfYSVrTnW3pisP3yiDMDdg_vwZ7WjAb';
 
 // Supabase JS v2 CDN から読み込み済み前提
 // <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
